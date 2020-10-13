@@ -1,11 +1,11 @@
 .data
-bufferSize: .word 256			#Tamanho dos buffers de entrada e saída
+bufferSize: .word 512			#Tamanho dos buffers de entrada e saída
 
 inputFile: .asciiz "entrada.txt"	#Nome do arquivo de entrada
-inputBuffer: .space 256			#Buffer onde as strings de entrada serão armazenadas
+inputBuffer: .space 512			#Buffer onde as strings de entrada serão armazenadas
 
 outputFile: .asciiz "saida.txt"		#Nome do arquivo de saída
-outputBuffer: .space 256		#Buffer onde as strings de saída serão armazenadas
+outputBuffer: .space 512		#Buffer onde as strings de saída serão armazenadas
 
 #A idéia desse código é usar a pilha para inverter as palavras da seguinte forma:
 #Todas as palavras são copiadas do arquivo de entrada para o inputBuffer.
