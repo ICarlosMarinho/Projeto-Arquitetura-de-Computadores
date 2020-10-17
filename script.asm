@@ -77,7 +77,7 @@ beq $t2, 13, exitCopyToStack	#Termina o procedimento se o código ascii do caract
 				#13 (Enter), indicando o fim de uma palavra.
 				
 seq $s5, $t2, 0			#Carrega o valor 1 em $s5 se o valor em $s2 for 0 (null), indicando o fim de uma palavra ou/e do arquivo.			
-beq $t2, 0, exitCopyToStack	#Termina o procedimento se o código ascii do caractere for igual a 0.	
+beq $s5, 1, exitCopyToStack	#Termina o procedimento se o código ascii do caractere for igual a 0.	
 sgt $t0, $t2, 47		#Carrega o valor 1 em $t0 se o código ascii em $s2 for maior que 47.
 slti $t1, $t2, 58		#Carrega o valor 1 em $t1 se o código ascii em $s2 for menor que 58.
 and $s4, $t1, $t0		#Carrega em $s4 o resultado de $t0 and $t1. 
@@ -90,7 +90,7 @@ exitCopyToStack:
 addi $s0, $s0, 1		#Incrementa o endereço em $s0 (para acessar o próximo caractere do inputBuffer).
 addi $s3, $s3, 1		#Incrementa o valor de $s3 em 1, pois o valor que está nesse endereço é nulo.
 				#Portanto descartamos esse valor.
-jr $ra				#Volta para main.r
+jr $ra				#Volta para main.
 
 copyFromStack:
 bgt $s3, $sp, exitCopyfromStack	#Se o valor contido em $s3 for mairor que 0x7fffeffc, indica que ja passamos pelo primeiro
