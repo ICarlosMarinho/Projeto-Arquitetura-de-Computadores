@@ -14,6 +14,14 @@ outputBuffer: .space 512		#Buffer onde as strings de saída serão armazenadas
 #Last In First Out da pilha (fazemos isso para cada palavra de forma individual). 
 #Por fim, as palavras invertidas são armazenadas no arquivo de saída.
 
+#Estamos considerando que o arquivo de entrada foi criado no windows,
+#que a quebra de linha corresponde ao conjunto /r/n ou os códigos 13 e 10, respectivamente.
+#Para arquivos criados no linux, que a quebra de linha corresponde a apenas /r teríamos 
+#que fazer pequenas modificações no código. Além disso, como caracteres utf-8 podem ter 
+#1 ou 2 bytes de tamanho para representar os caracteres do ascii e os latinos, foi 
+#necessário adicionar algumas verificações nesse sentido, o que comprometeu um pouco 
+#do desempenho da exdecução, pois, não tivemos tempo de pensar em um algoritmo melhor.
+
 .text
 main:
 jal openFileForRead	#Executa o procedimento que abre o arquivo de entrada para leitura e armazena o valor $pc + 4 em $ra.
@@ -22,15 +30,16 @@ jal openFileForRead	#Executa o procedimento que abre o arquivo de entrada para l
 			
 la $s0, inputBuffer	#Carrega o endereço inicial do inputBuffer em $s0.
 la $s1, outputBuffer	#Carrega o endereço inicial do outputBuffer em $s1.
-move $s3, $sp		#Copia o endereço inicial da pilha para $s3 (iremos manipular esse valor para percorrer a pilha).
 
 reverseWords:
+move $s3, $sp			#Copia o endereço inicial da pilha para $s3 (iremos manipular esse valor para percorrer a pilha).
 jal copyToStack			#Executa o procedimento que copia uma palavra do buffer de entrada para a pilha, caractere a caractere.
 beq, $s4, 1, endReverseWords	#$s4 armazena o valor 1 quando um caractere possui o código (em base decimal) 
 				#ascii entre [48, 57] que representam os caracteres [0, 9]. Portanto, caso $v0 armazene 1, o loop se encerra
-				#E essa palava que contém o caractere entre [0, 9] não é copiada para o buffer de saída, bem como as posteriores.
-				
+				#E essa palava que contém o caractere entre [0, 9] não é copiada para o buffer de saída, bem como as posteriores.				
+
 jal copyFromStack		#Executa o procedimento que copia uma da palavra da pilha para o buffer de saída.
+
 beq $s5, 1, endReverseWords	#$s5 armazena o valor 1 quando o último caractere carregado do inputBuffer pussui o código ascii igual a 0
 				#(null), indicando o final do arquivo. Portanto, caso $s5 armazena 1, o loop se encerra logo após copiar a
 				#última palavra da pilha para o buffer de saída.	
@@ -72,40 +81,82 @@ syscall			#Executa a chamada de sistema para fechar o arquivo
 jr $ra			#Retorna para main.
 
 copyToStack:
-lb $t2, ($s0)			#Carrega em $t2 o caractere contido no endereço ($s0) do inputBuffer
-beq $t2, 13, exitCopyToStack	#Termina o procedimento se o código ascii do caractere for igual a
-				#13 (Enter), indicando o fim de uma palavra.
-				
+lbu $t2, ($s0)			#Carrega em $t2 o caractere contido no endereço ($s0) do inputBuffer.
+bgt $t2, 127, storeHalfOnStack	#Se o valor lido do buffer for maior que 127, o caractere é representado por 2 bytes.
+				#Portanto temos que armazenar uma halfword na pilha.  
+beq $t2, 13, isCarriageReturn	#Termina o procedimento se o código ascii do caractere for igual a
+				#13 (CR ou Enter), indicando o fim de uma palavra.
+							
 seq $s5, $t2, 0			#Carrega o valor 1 em $s5 se o valor em $s2 for 0 (null), indicando o fim de uma palavra ou/e do arquivo.			
-beq $s5, 1, exitCopyToStack	#Termina o procedimento se o código ascii do caractere for igual a 0.	
-sgt $t0, $t2, 47		#Carrega o valor 1 em $t0 se o código ascii em $s2 for maior que 47.
-slti $t1, $t2, 58		#Carrega o valor 1 em $t1 se o código ascii em $s2 for menor que 58.
-and $s4, $t1, $t0		#Carrega em $s4 o resultado de $t0 and $t1. 
+beq $s5, 1, exitCopyToStack	#Termina o procedimento se o código utf-8 do caractere for igual a 0	
+sgt $t0, $t2, 47		#Carrega o valor 1 em $t0 se o código utf-8 em $s2 for maior que 47.
+slti $t1, $t2, 58		#Carrega o valor 1 em $t1 se o código utf-8 em $s2 for menor que 58.
+and $s4, $t1, $t0		#Carrega em $s4 o resultado de $t0 && $t1. 
 beq $s4, 1, exitCopyToStack	#Se $s4 for 1, o caractere está no intervalo [48, 57], logo é numérico. Portanto, o programa será finalizado.
-sb $t2, ($s3)			#Carrega em $s3 (endereço atual na pilha) o caractere que está em $t2.
-addi $s3, $s3, -1		#Decrementa o endereço em $s3 (para acessar o próximo endereço livre na pilha).
-addi $s0, $s0, 1		#Incrementa o endereço em $s0 (para acessar o próximo caractere do inputBuffer).
-j copyToStack			#Executa mais uma iteração.
+j storeByteOnStack		#Executa o procedimento que armazena 1 byte na pilha.
 exitCopyToStack:
-addi $s0, $s0, 1		#Incrementa o endereço em $s0 (para acessar o próximo caractere do inputBuffer).
-addi $s3, $s3, 1		#Incrementa o valor de $s3 em 1, pois o valor que está nesse endereço é nulo.
-				#Portanto descartamos esse valor.
+addi $s3, $s3, 4		#Soma 4 ao valor de $s3 (endereço atual na pilha), pois o valor que está 
+				#nesse endereço não pertence a string atual. Portanto descartamos esse valor.
 jr $ra				#Volta para main.
 
+isCarriageReturn:
+addi $s0, $s0, 2		#Soma 2 ao endereço em $s0 (como o caractere que está nesse endereço é o CR, o próximo é o LF).
+				#Após a soma, o valor em ($s0) é o primeiro caractere da próxima string.
+j exitCopyToStack
+
+storeByteOnStack:
+sh $t2, ($s3)			#Carrega em $s3 (endereço atual na pilha) o caractere que está em $t2.
+addi $s3, $s3, -4		#Soma 4 ao endereço em $s3 (para acessar o próximo endereço livre na pilha).
+addi $s0, $s0, 1		#Incrementa o endereço em $s0 (para acessar o próximo caractere do inputBuffer).
+j copyToStack			#Executa mais uma iteração.
+
+storeHalfOnStack:
+sll $t3, $t2, 8			#Faz um shift left de 8 bits no valor do caractere atual e armazena o resultado em $t3.
+addi $s0, $s0, 1		#Incrementa o endereço em $s0 (para acessar o próximo caractere do inputBuffer).
+lbu $t2, ($s0)			#Carrega em $t2 o caractere contido no endereço ($s0) do inputBuffer
+add $t3, $t3, $t2		#Soma o valor em $t3 (que fizemos o shift left) e somamos ele ao valor em %$t2 (valor atual do buffer)
+				#O resultado será o caractere utf-8 de 2 bytes.
+				
+sh $t3, ($s3)			#Carrega em $s3 (endereço atual na pilha) o caractere (de 2 bytes) que está em $t3.
+addi $s3, $s3, -4		#Subtrai 4 do endereço em $s3 (para acessar o próximo endereço livre na pilha).
+addi $s0, $s0, 1		#Incrementa o endereço em $s0 (para acessar o próximo caractere do inputBuffer).
+j copyToStack			#Executa mais uma iteração.
+
 copyFromStack:
-bgt $s3, $sp, exitCopyfromStack	#Se o valor contido em $s3 for mairor que 0x7fffeffc, indica que ja passamos pelo primeiro
-				#endereço da pilha. Portanto, o procedimento deve terminar.		 
-lb $t2, ($s3)			#Carrega em $t2 o caractere contido no endereço ($s3) da pilha.
-sb $t2, ($s1)			#Carrega em $s1 (endereço atual no outputBuffer) o caractere que está em $s2.
-addi $s1, $s1, 1		#Incrementa o endereço em $s1 (para acessar o próximo caractere do outputBuffer).
-addi $s3, $s3, 1		#incrementa o endereço em $s3 (para acessar o próximo endereço válido na pilha).
-j copyFromStack			#Executa mais uma iteração.
+bgt $s3, $sp, exitCopyfromStack	#Se o valor contido em $s3 for maior que 0x7fffeffc,
+				# é porque chegamos no primeiro endereço da pilha. Portanto, o procedimento deve terminar.
+						 
+lhu $t2, ($s3)			#Carrega em $t2 o caractere contido no endereço ($s3) da pilha.
+bgt $t2, 127, storeHalfOnBuffer	#Se o valor for maior que 127 indica que o caractere lido é um utf-8 de 2 bytes.
+				#Portanto precisamos armazenar um halfword no outputBuffer.
+				
+j storeByteOnBuffer		#Armazena o caractere utf-8 de 1 byte no outputBuffer.
 exitCopyfromStack:
-li $t0, 13			#Carrega o código ascii 13 (Enter) em $t0.
-sb $t0, ($s1)			#Carrega o valor contido em $t0 no outputBuffer
+li $t2, 13			#Carrega o valor 13 (CR) em $t0.
+sb $t2, ($s1)			#Carrega o valor contido em $t0 no outputBuffer.
 				#(Para que a próxima palavra fique na linha seguinte do arquivo).
 addi $s1, $s1, 1		#Incrementa o endereço do buffer de saída carregado em $s1, para obtermos o próximo endereço livre no outputBuffer.
 jr $ra				#Volta para main.
+
+storeByteOnBuffer:
+sb $t2, ($s1)			#Carrega em $s1 (endereço atual no outputBuffer) o caractere que está em $s2.
+addi $s3, $s3, 4		#incrementa o endereço em $s3 (para acessar o próximo endereço válido na pilha).
+addi $s1, $s1, 1		#Incrementa o endereço do buffer de saída carregado em $s1, para obtermos o próximo endereço livre no outputBuffer..
+j copyFromStack			#Executa mais uma iteração.
+
+storeHalfOnBuffer:
+srl $t3, $t2, 8			#Faz um shift right de 8 bits no valor do caractere atual e armazena o resultado em $t3.
+				#Em $t3 ficarão armazenados os 8 bits mais significativos do caractere utf-8 de 2 bytes.
+				
+sb $t3, ($s1)			#Carrega em $s1 (endereço atual no outputBuffer) o caractere que está em $t3.
+sll $t3, $t3, 8			#Faz um shift left de 8 bits no valor do caractere atual e armazena o resultado em $t3.
+sub $t3, $t2, $t3		#Subtrai o valor em $t3 do valor em $t2. O resultado obtido são os 8 bits menos significativos
+				#do caractere utf-8 de 2 bytes. Armazenamos esse resultado em $t3.
+				
+sb $t3, 1($s1)			#Carrega em ($s1) + 1 (endereço atual no outputBuffer) o caractere que está em $t3.
+addi $s3, $s3, 4		#soma 4 ao endereço em $s3 (para acessar o próximo endereço válido na pilha).
+addi $s1, $s1, 2		#soma 2 ao endereço em $s1 (para acessar o próximo caractere do outputBuffer).
+j copyFromStack			#Executa mais uma iteração.
 
 openFileForWrite:
 li $v0, 13		#Carrega o valor 13 (código para abrir o arquivo na syscall) em $v0.
